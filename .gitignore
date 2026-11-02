@@ -1,0 +1,7 @@
+*.mp4
+*.mov
+*.mkv
+out/
+.DS_Store
+clips.txt
+__pycache__/
