@@ -50,6 +50,12 @@ def height(path):
     return int(out.stdout)
 
 
+def has_audio(path):
+    out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=index",
+                          "-of", "csv=p=0", str(path)], check=True, capture_output=True, text=True)
+    return bool(out.stdout.strip())
+
+
 def title_filter(textfile, h):
     # news-style lower third for the whole clip: dark box sized to the text, red bar on its left.
     # y_align=font makes box height depend on the font, not the text, so both boxes always match;
@@ -78,7 +84,7 @@ def main():
         sys.exit("ffmpeg has no drawtext; install it with: brew install ffmpeg-full")
 
     out.mkdir(parents=True, exist_ok=True)
-    h = height(src)
+    h, audio = height(src), has_audio(src)  # some match recordings have no audio track
     # one ffmpeg pass: each clip is its own seeked input of the source, titled, then chained with
     # xfade/acrossfade in clips.txt order. Offsets use the -t durations, which both streams are trimmed to.
     with tempfile.TemporaryDirectory() as tmp:
@@ -89,15 +95,17 @@ def main():
             inputs += ["-ss", str(start), "-t", str(end - start), "-i", str(src)]
             graph.append(f"[{i}:v]{title_filter(textfile, h)}[t{i}]")
             if i == 0:
-                graph.append("[0:a]anull[a0]")  # a filter output, so -map works with a single clip too
+                if audio:
+                    graph.append("[0:a]anull[a0]")  # a filter output, so -map works with a single clip too
                 v, a = "[t0]", "[a0]"
             else:
                 graph.append(f"{v}[t{i}]xfade=transition=fade:duration={FADE}:offset={offset:.3f}[v{i}]")
-                graph.append(f"{a}[{i}:a]acrossfade=d={FADE}[a{i}]")
+                if audio:
+                    graph.append(f"{a}[{i}:a]acrossfade=d={FADE}[a{i}]")
                 v, a = f"[v{i}]", f"[a{i}]"
             offset += end - start - FADE
         run(["ffmpeg", "-y", "-v", "error", *inputs, "-filter_complex", ";".join(graph),
-             "-map", v, "-map", a, *ENCODE, str(out / "review.mp4")])
+             "-map", v, *(["-map", a] if audio else []), *ENCODE, str(out / "review.mp4")])
 
 
 if __name__ == "__main__":
